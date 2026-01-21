@@ -16,21 +16,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-func makeMetric(name, value string) prometheus.Metric {
-	m, ok := metrics[name]
-	if !ok {
-		return nil
-	}
+func makeMetric(m lib.Metric, val float64) prometheus.Metric {
 	if !config.MetricSets().Has(m.Set) {
 		return nil
 	}
-
-	val, err := strconv.ParseFloat(value, 64)
-	if err != nil {
-		log.Errf("%s: %s: %s", name, value, err)
-		return nil
-	}
-
 	return prometheus.MustNewConstMetric(m.Desc(), m.ValueType, val)
 }
 
@@ -57,20 +46,31 @@ var coverageRe = regexp.MustCompile(`^(\w+)\s+.*\s+total: (\d+)$`)
 
 func (Collector) Collect(ch chan<- prometheus.Metric) {
 	buf := appctl.OvsVSwitchd("coverage/show")
-	if buf == "" {
-		return
-	}
 
+	// Parse coverage/show output into a map of name -> value
+	// OVS only reports non-zero counters, so we need to emit 0 for missing ones
+	values := make(map[string]float64)
 	scanner := bufio.NewScanner(strings.NewReader(buf))
 	for scanner.Scan() {
 		line := scanner.Text()
-
 		match := coverageRe.FindStringSubmatch(line)
 		if match != nil {
-			metric := makeMetric(match[1], match[2])
-			if metric != nil {
-				ch <- metric
+			name := match[1]
+			val, err := strconv.ParseFloat(match[2], 64)
+			if err != nil {
+				log.Errf("%s: %s: %s", name, match[2], err)
+				continue
 			}
+			values[name] = val
+		}
+	}
+
+	// Emit all defined metrics, using 0 for any not present in output
+	for name, m := range metrics {
+		val := values[name]
+		metric := makeMetric(m, val)
+		if metric != nil {
+			ch <- metric
 		}
 	}
 }

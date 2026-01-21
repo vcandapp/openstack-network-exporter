@@ -62,13 +62,24 @@ compare() {
 	grep -vw "$@" "$file1" > "$file1.filtered"
 	grep -vw "$@" "$file2" > "$file2.filtered"
 
-        # Check that same fields have been generated
-	sed -En 's/^([a-z0-9_]+).*/\1/p' "$file1.filtered" > "$file1.fields"
-	sed -En 's/^([a-z0-9_]+).*/\1/p' "$file2.filtered" > "$file2.fields"
-	if ! diff -u "$file1.fields" "$file2.fields" >/dev/null; then
-		echo "ERROR: Statistics set is not completed, Files have different fields"
+	# Extract field names from both files
+	sed -En 's/^([a-z0-9_]+).*/\1/p' "$file1.filtered" | sort -u > "$file1.fields"
+	sed -En 's/^([a-z0-9_]+).*/\1/p' "$file2.filtered" | sort -u > "$file2.fields"
+
+	# Find common fields (intersection) - exporter may have extra zero-value metrics
+	# which is expected after the coverage fix. We only compare metrics that OVS reports.
+	comm -12 "$file1.fields" "$file2.fields" > "$file1.common"
+
+	# Check that all OVS-reported fields are present in exporter output
+	if ! diff -u "$file2.fields" <(comm -12 "$file1.fields" "$file2.fields") >/dev/null; then
+		echo "ERROR: Exporter is missing some fields that OVS reports"
+		diff -u "$file2.fields" <(comm -12 "$file1.fields" "$file2.fields")
 		return 1
 	fi
+
+	# Filter both files to only include common fields for value comparison
+	grep -wFf "$file1.common" "$file1.filtered" | sort > "$file1.comparable"
+	grep -wFf "$file1.common" "$file2.filtered" | sort > "$file2.comparable"
 
 	# Check that values are similar (under a defined threshold)
 	retvalue=0
@@ -96,7 +107,7 @@ compare() {
 		if ! check_threshold "$field1" "$val1" "$val2" "$stat_thr"; then
 			retvalue=1
 		fi
-	done 4<"$file1.filtered" 5<"$file2.filtered"
+	done 4<"$file1.comparable" 5<"$file2.comparable"
 
 	return "$retvalue"
 }
