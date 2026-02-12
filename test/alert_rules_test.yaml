@@ -1,0 +1,161 @@
+# promtool test file for OVS alert rules
+# Run with: promtool test rules test/alert_rules_test.yaml
+#
+# This validates that alerting rules fire correctly given specific metric values.
+
+rule_files:
+  - ../rules/sample_ovs_pmd_alerts.yaml
+  - ../rules/sample_ovs_interface_alerts.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # ==========================================================================
+  # OVS PMD Lost Upcalls - should fire when increase > 0
+  # ==========================================================================
+  - interval: 1m
+    input_series:
+      - series: 'ovs_pmd_lost_upcalls{cpu="1",numa="0"}'
+        values: '0 1 2 3 4 5 6 7'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OVSPMDLostUpcallsCritical
+        exp_alerts:
+          - exp_labels:
+              alertname: OVSPMDLostUpcallsCritical
+              severity: critical
+              cpu: "1"
+              numa: "0"
+            exp_annotations:
+              summary: "OVS PMD lost upcalls (critical)"
+              description: |
+                PMD thread cpu 1 (numa 0) has lost upcalls
+                in the last 5 minutes. A lost upcall means the PMD dropped the upcall entirely:
+                no userspace handling, no flow install, no retry. This is real, unrecoverable
+                packet drop—not noise.
+
+  # No alert when metric stays at 0
+  - interval: 1m
+    input_series:
+      - series: 'ovs_pmd_lost_upcalls{cpu="2",numa="0"}'
+        values: '0 0 0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OVSPMDLostUpcallsCritical
+        exp_alerts: []
+
+  # ==========================================================================
+  # OVS PMD Non-Voluntary Context Switches - should fire when increase > 200
+  # ==========================================================================
+  - interval: 1m
+    input_series:
+      - series: 'ovs_pmd_nonvol_context_switches{cpu="1",numa="0"}'
+        values: '0 50 100 150 200 250 300 350'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: OVSPMDNonVoluntaryContextSwitchesHigh
+        exp_alerts:
+          - exp_labels:
+              alertname: OVSPMDNonVoluntaryContextSwitchesHigh
+              severity: critical
+              cpu: "1"
+              numa: "0"
+            exp_annotations:
+              summary: "OVS PMD high non-voluntary context switches (critical)"
+              description: |
+                PMD thread cpu 1 (numa 0) has more than 200
+                non-voluntary context switches in the last 5 minutes. High context switching
+                indicates the PMD is being preempted; this can cause packet drops and degraded
+                datapath performance.
+
+  # No alert when increase is below threshold (< 200)
+  - interval: 1m
+    input_series:
+      - series: 'ovs_pmd_nonvol_context_switches{cpu="2",numa="0"}'
+        values: '0 20 40 60 80 100 120 140'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: OVSPMDNonVoluntaryContextSwitchesHigh
+        exp_alerts: []
+
+  # ==========================================================================
+  # OVS Interface Rx Dropped - should fire (warning) when increase > 100
+  # ==========================================================================
+  - interval: 1m
+    input_series:
+      - series: 'ovs_interface_rx_dropped{bridge="br-int",port="tap0",interface="tap0",type="internal"}'
+        values: '0 30 60 90 120 150 180 210'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OVSInterfaceRxDroppedWarning
+        exp_alerts:
+          - exp_labels:
+              alertname: OVSInterfaceRxDroppedWarning
+              severity: warning
+              bridge: "br-int"
+              port: "tap0"
+              interface: "tap0"
+              type: "internal"
+            exp_annotations:
+              summary: "OVS interface Rx ring drops (warning)"
+              description: |
+                Interface tap0 has more than 100 packets dropped in the last 5 minutes
+                because the Rx ring was full. Bridge: br-int
+
+  # No alert when increase is below threshold
+  - interval: 1m
+    input_series:
+      - series: 'ovs_interface_rx_dropped{bridge="br-int",port="tap1",interface="tap1",type="internal"}'
+        values: '0 10 20 30 40 50 60 70'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OVSInterfaceRxDroppedWarning
+        exp_alerts: []
+
+  # ==========================================================================
+  # OVS Interface Rx Errors - should fire (critical) when increase > 100
+  # ==========================================================================
+  - interval: 1m
+    input_series:
+      - series: 'ovs_interface_rx_errors{bridge="br-int",port="tap0",interface="tap0",type="internal"}'
+        values: '0 30 60 90 120 150 180 210'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OVSInterfaceRxErrorsCritical
+        exp_alerts:
+          - exp_labels:
+              alertname: OVSInterfaceRxErrorsCritical
+              severity: critical
+              bridge: "br-int"
+              port: "tap0"
+              interface: "tap0"
+              type: "internal"
+            exp_annotations:
+              summary: "OVS interface Rx errors (critical)"
+              description: |
+                Interface tap0 has more than 100 invalid packets received in the last 5 minutes.
+                Bridge: br-int
+
+  # ==========================================================================
+  # OVS Interface Tx Errors - should fire (critical) when increase > 100
+  # ==========================================================================
+  - interval: 1m
+    input_series:
+      - series: 'ovs_interface_tx_errors{bridge="br-int",port="tap0",interface="tap0",type="internal"}'
+        values: '0 30 60 90 120 150 180 210'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OVSInterfaceTxErrorsCritical
+        exp_alerts:
+          - exp_labels:
+              alertname: OVSInterfaceTxErrorsCritical
+              severity: critical
+              bridge: "br-int"
+              port: "tap0"
+              interface: "tap0"
+              type: "internal"
+            exp_annotations:
+              summary: "OVS interface Tx errors (critical)"
+              description: |
+                Interface tap0 has more than 100 errors while transmitting packets in the last 5 minutes.
+                Bridge: br-int

@@ -26,6 +26,46 @@ Steps:
    for t in ./test/test_*.sh; do bash -xe "$t"; done
    ```
 
+## Alert rule tests
+
+The `alert_rules_test.yaml` file contains unit tests for the Prometheus
+alerting rules in `rules/`. These tests validate that alerts fire correctly
+given specific metric values.
+
+The `test4_alert_rules.sh` script runs these tests as part of the CI pipeline.
+It is executed automatically by `make test`.
+
+### Prerequisites
+
+Install `promtool` (part of Prometheus):
+
+```bash
+# Fedora
+dnf install golang-github-prometheus
+
+# Debian/Ubuntu
+apt install prometheus
+
+# Or download standalone binary from:
+# https://prometheus.io/download/
+```
+
+### Running alert tests manually
+
+From the repository root:
+
+```bash
+promtool test rules test/alert_rules_test.yaml
+```
+
+Or via the test script:
+
+```bash
+bash test/test4_alert_rules.sh
+```
+
+This will output SUCCESS/FAILED without needing a running Prometheus instance.
+
 ## Configuration files
 
 Configuration files are used:
