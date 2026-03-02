@@ -1,0 +1,26 @@
+---
+# Default variables for network-exporter-role
+
+# Exporter settings
+exporter_version: main
+exporter_repo: https://github.com/openstack-k8s-operators/openstack-network-exporter.git
+exporter_install_dir: /opt/openstack-network-exporter
+exporter_config_path: /etc/openstack-network-exporter.yaml
+exporter_binary_path: /usr/local/bin/openstack-network-exporter
+exporter_port: 1981
+
+# Prometheus settings
+prometheus_version: "2.51.0"
+prometheus_install_dir: /opt/prometheus
+prometheus_config_path: /opt/prometheus/prometheus.yml
+prometheus_rules_dir: /opt/prometheus/rules
+prometheus_port: 9090
+prometheus_scrape_interval: 15s
+prometheus_evaluation_interval: 15s
+
+# Alert rules
+alert_rules_src_dir: "{{ playbook_dir }}/../rules"
+alert_rules_files:
+  - sample_ovs_interface_alerts.yaml
+  - sample_ovs_pmd_alerts.yaml
+  - sample_openstack_network_exporter_down.yaml

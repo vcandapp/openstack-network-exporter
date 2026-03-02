@@ -1,0 +1,36 @@
+---
+# Tasks for network-exporter-role
+
+- name: Install required packages
+  ansible.builtin.dnf:
+    name:
+      - golang
+      - make
+      - git
+    state: present
+
+- name: Clone openstack-network-exporter repository
+  ansible.builtin.git:
+    repo: https://github.com/openstack-k8s-operators/openstack-network-exporter.git
+    dest: /opt/openstack-network-exporter
+    version: main
+
+- name: Build openstack-network-exporter
+  ansible.builtin.command:
+    cmd: make
+    chdir: /opt/openstack-network-exporter
+  changed_when: true
+
+- name: Copy binary to /usr/local/bin
+  ansible.builtin.copy:
+    src: /opt/openstack-network-exporter/openstack-network-exporter
+    dest: /usr/local/bin/openstack-network-exporter
+    mode: '0755'
+    remote_src: true
+
+- name: Copy default configuration
+  ansible.builtin.copy:
+    src: /opt/openstack-network-exporter/etc/openstack-network-exporter.yaml
+    dest: /etc/openstack-network-exporter.yaml
+    mode: '0644'
+    remote_src: true

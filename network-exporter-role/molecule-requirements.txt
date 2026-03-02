@@ -1,0 +1,4 @@
+molecule>=6.0.0
+molecule-plugins[podman]
+ansible>=8.0.0
+ansible-core>=2.15.0

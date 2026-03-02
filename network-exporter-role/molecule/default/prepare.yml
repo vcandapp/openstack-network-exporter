@@ -1,0 +1,148 @@
+---
+- name: Prepare base environment
+  hosts: all
+  become: true
+  tasks:
+    - name: Update dnf cache
+      dnf:
+        update_cache: true
+      changed_when: false
+
+    - name: Install base packages
+      dnf:
+        name:
+          - git
+          - wget
+          - tar
+          - iproute
+          - procps-ng
+        state: present
+
+- name: Prepare OVS/OVN node
+  hosts: ovs-ovn
+  become: true
+  tasks:
+    - name: Configure RHEL 9 BaseOS repository
+      copy:
+        dest: /etc/yum.repos.d/rhel9-baseos.repo
+        content: |
+          [rhel-9-baseos]
+          name=Red Hat Enterprise Linux 9 - BaseOS
+          baseurl=http://rhos-qe-mirror.lab.eng.rdu2.redhat.com/pulp/content/dist/rhel9/9/x86_64/baseos/os/
+          enabled=1
+          gpgcheck=0
+        mode: '0644'
+
+    - name: Configure RHEL 9 AppStream repository
+      copy:
+        dest: /etc/yum.repos.d/rhel9-appstream.repo
+        content: |
+          [rhel-9-appstream]
+          name=Red Hat Enterprise Linux 9 - AppStream
+          baseurl=http://rhos-qe-mirror.lab.eng.rdu2.redhat.com/pulp/content/dist/rhel9/9/x86_64/appstream/os/
+          enabled=1
+          gpgcheck=0
+        mode: '0644'
+
+    - name: Configure FDP repository
+      copy:
+        dest: /etc/yum.repos.d/rhosp-fdp.repo
+        content: |
+          [rhosp-rhel-9.2-fdp]
+          name=Red Hat Enterprise Linux Fast Datapath 9 - x86_64
+          baseurl=http://rhos-qe-mirror.lab.eng.rdu2.redhat.com/pulp/content/dist/layered/rhel9/x86_64/fast-datapath/os/
+          enabled=1
+          gpgcheck=0
+        mode: '0644'
+
+    - name: Install OVS and OVN
+      dnf:
+        name:
+          - openvswitch3.3
+          - ovn24.03
+          - ovn24.03-central
+          - ovn24.03-host
+        state: present
+
+    - name: Start openvswitch service
+      ansible.builtin.systemd:
+        name: openvswitch
+        state: started
+        enabled: true
+
+    - name: Create test bridge br-test
+      ansible.builtin.command:
+        cmd: ovs-vsctl --may-exist add-br br-test
+      changed_when: true
+
+    - name: Create test internal port
+      ansible.builtin.command:
+        cmd: ovs-vsctl --may-exist add-port br-test test-port -- set interface test-port type=internal
+      changed_when: true
+
+    - name: Create second test port
+      ansible.builtin.command:
+        cmd: ovs-vsctl --may-exist add-port br-test test-port2 -- set interface test-port2 type=internal
+      changed_when: true
+
+- name: Prepare exporter container
+  hosts: exporter
+  become: true
+  tasks:
+    - name: Install Go
+      dnf:
+        name: golang
+        state: present
+
+- name: Prepare Prometheus container
+  hosts: prometheus
+  become: true
+  vars:
+    prometheus_version: "2.51.0"
+  tasks:
+    - name: Install download tools
+      dnf:
+        name:
+          - wget
+          - tar
+        state: present
+
+    - name: Download Prometheus
+      ansible.builtin.get_url:
+        url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+        dest: /tmp/prometheus.tar.gz
+        mode: '0644'
+
+    - name: Extract Prometheus
+      ansible.builtin.unarchive:
+        src: /tmp/prometheus.tar.gz
+        dest: /opt/
+        remote_src: true
+
+    - name: Create symlink
+      ansible.builtin.file:
+        src: "/opt/prometheus-{{ prometheus_version }}.linux-amd64"
+        dest: /opt/prometheus
+        state: link
+
+    - name: Create Prometheus config
+      ansible.builtin.copy:
+        dest: /opt/prometheus/prometheus.yml
+        content: |
+          global:
+            scrape_interval: 15s
+
+          scrape_configs:
+            - job_name: 'prometheus'
+              static_configs:
+                - targets: ['localhost:9090']
+
+            - job_name: 'openstack-network-exporter'
+              static_configs:
+                - targets: ['exporter:1981']
+        mode: '0644'
+
+    - name: Start Prometheus in background
+      ansible.builtin.shell:
+        cmd: nohup /opt/prometheus/prometheus --config.file=/opt/prometheus/prometheus.yml --web.listen-address=:9090 > /var/log/prometheus.log 2>&1 &
+      changed_when: true

@@ -1,0 +1,136 @@
+---
+- name: Converge role - Deploy network exporter
+  hosts: exporter
+  become: true
+  roles:
+    - role: network-exporter-role
+
+- name: Configure Prometheus to scrape network exporter
+  hosts: prometheus
+  become: true
+  vars:
+    prometheus_install_dir: /opt/prometheus
+    prometheus_config_path: /opt/prometheus/prometheus.yml
+    prometheus_rules_dir: /opt/prometheus/rules
+    prometheus_port: 9090
+    exporter_port: 1981
+    alert_rules_src_dir: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}/../rules"
+  tasks:
+    - name: Create rules directory
+      ansible.builtin.file:
+        path: "{{ prometheus_rules_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Copy alert rules from repo
+      ansible.builtin.copy:
+        src: "{{ alert_rules_src_dir }}/{{ item }}"
+        dest: "{{ prometheus_rules_dir }}/{{ item }}"
+        mode: '0644'
+      loop:
+        - sample_ovs_interface_alerts.yaml
+        - sample_ovs_pmd_alerts.yaml
+        - sample_openstack_network_exporter_down.yaml
+      ignore_errors: true
+
+    - name: Update Prometheus config to scrape network exporter
+      ansible.builtin.copy:
+        dest: "{{ prometheus_config_path }}"
+        content: |
+          global:
+            scrape_interval: 15s
+            evaluation_interval: 15s
+
+          rule_files:
+            - "rules/*.yaml"
+
+          scrape_configs:
+            - job_name: 'prometheus'
+              static_configs:
+                - targets: ['localhost:{{ prometheus_port }}']
+
+            - job_name: 'openstack-network-exporter'
+              static_configs:
+                - targets: ['exporter:{{ exporter_port }}']
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  regex: 'ovs_.*|ovn_.*'
+                  action: keep
+        mode: '0644'
+      register: prometheus_config
+
+    - name: Check if Prometheus is already running
+      ansible.builtin.shell:
+        cmd: pgrep -x prometheus || echo "not running"
+      register: prometheus_running
+      changed_when: false
+
+    - name: Stop existing Prometheus
+      ansible.builtin.shell:
+        cmd: pkill -x prometheus || true
+      changed_when: false
+      when: prometheus_running.stdout != "not running"
+
+    - name: Wait for Prometheus to stop
+      ansible.builtin.pause:
+        seconds: 3
+      when: prometheus_running.stdout != "not running"
+
+    - name: Verify Prometheus binary exists
+      ansible.builtin.stat:
+        path: "{{ prometheus_install_dir }}/prometheus"
+      register: prometheus_binary
+
+    - name: Fail if Prometheus binary not found
+      ansible.builtin.fail:
+        msg: "Prometheus binary not found at {{ prometheus_install_dir }}/prometheus. Run molecule prepare first."
+      when: not prometheus_binary.stat.exists
+
+    - name: Start Prometheus
+      ansible.builtin.shell:
+        cmd: |
+          cd {{ prometheus_install_dir }}
+          setsid ./prometheus --config.file={{ prometheus_config_path }} --web.listen-address=:{{ prometheus_port }} > /var/log/prometheus.log 2>&1 &
+          disown
+          sleep 3
+          pgrep -x prometheus
+      register: prometheus_start
+      changed_when: true
+      async: 10
+      poll: 5
+
+    - name: Display Prometheus PID
+      ansible.builtin.debug:
+        msg: "Prometheus started with PID: {{ prometheus_start.stdout }}"
+
+    - name: Check Prometheus log if failed to start
+      ansible.builtin.shell:
+        cmd: tail -20 /var/log/prometheus.log
+      register: prometheus_log
+      when: prometheus_start.stdout == ""
+
+    - name: Display Prometheus log
+      ansible.builtin.debug:
+        msg: "{{ prometheus_log.stdout_lines }}"
+      when: prometheus_start.stdout == ""
+
+    - name: Wait for Prometheus to be ready
+      ansible.builtin.uri:
+        url: "http://localhost:{{ prometheus_port }}/-/ready"
+        method: GET
+        status_code: 200
+      register: prometheus_ready
+      retries: 10
+      delay: 3
+      until: prometheus_ready.status == 200
+
+    - name: Verify scrape targets
+      ansible.builtin.uri:
+        url: "http://localhost:{{ prometheus_port }}/api/v1/targets"
+        method: GET
+        return_content: true
+      register: targets
+
+    - name: Display scrape targets
+      ansible.builtin.debug:
+        msg: "Prometheus targets: {{ targets.json.data.activeTargets | map(attribute='labels') | list }}"

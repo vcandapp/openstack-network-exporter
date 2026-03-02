@@ -1,0 +1,110 @@
+
+---
+- name: Verify prepare stage
+  hosts: all
+  tasks:
+
+    - name: Check git installed
+      command: git --version
+      changed_when: false
+
+- name: Verify OVS
+  hosts: ovs-ovn
+  tasks:
+    - name: Check ovs-vsctl
+      command: ovs-vsctl --version
+      changed_when: false
+
+- name: Verify Go
+  hosts: exporter
+  tasks:
+    - name: Check go version
+      command: go version
+      changed_when: false
+
+- name: Verify openstack-network-exporter
+  hosts: exporter
+  tasks:
+    - name: Check exporter binary exists
+      ansible.builtin.stat:
+        path: /usr/local/bin/openstack-network-exporter
+      register: exporter_binary
+
+    - name: Assert exporter binary exists
+      ansible.builtin.assert:
+        that:
+          - exporter_binary.stat.exists
+          - exporter_binary.stat.executable
+        fail_msg: "openstack-network-exporter binary not found or not executable"
+
+    - name: Run openstack-network-exporter --help
+      ansible.builtin.command:
+        cmd: /usr/local/bin/openstack-network-exporter --help
+      register: exporter_help
+      changed_when: false
+      failed_when: exporter_help.rc != 0
+
+    - name: Display exporter help output
+      ansible.builtin.debug:
+        msg: "{{ exporter_help.stderr_lines }}"
+
+    - name: Verify help output contains expected text
+      ansible.builtin.assert:
+        that:
+          - "'Usage of' in exporter_help.stderr"
+          - "'List all supported metrics' in exporter_help.stderr"
+        fail_msg: "openstack-network-exporter --help output is not as expected"
+        success_msg: "openstack-network-exporter is installed and working correctly"
+
+- name: Verify Prometheus
+  hosts: prometheus
+  tasks:
+    - name: Check Prometheus binary exists
+      ansible.builtin.stat:
+        path: /opt/prometheus/prometheus
+      register: prometheus_binary
+
+    - name: Assert Prometheus binary exists
+      ansible.builtin.assert:
+        that:
+          - prometheus_binary.stat.exists
+          - prometheus_binary.stat.executable
+        fail_msg: "Prometheus binary not found"
+
+    - name: Check Prometheus process is running
+      ansible.builtin.shell:
+        cmd: pgrep -f "prometheus.*config.file" || true
+      register: prometheus_pid
+      changed_when: false
+
+    - name: Display Prometheus PID
+      ansible.builtin.debug:
+        msg: "Prometheus PID: {{ prometheus_pid.stdout }}"
+
+    - name: Assert Prometheus is running
+      ansible.builtin.assert:
+        that:
+          - prometheus_pid.stdout | length > 0
+        fail_msg: "Prometheus is not running"
+        success_msg: "Prometheus is running with PID {{ prometheus_pid.stdout }}"
+
+    - name: Wait for Prometheus to be ready
+      ansible.builtin.uri:
+        url: http://localhost:9090/-/ready
+        method: GET
+        status_code: 200
+      register: prometheus_ready
+      retries: 5
+      delay: 3
+      until: prometheus_ready.status == 200
+
+    - name: Check Prometheus API health
+      ansible.builtin.uri:
+        url: http://localhost:9090/api/v1/status/config
+        method: GET
+        status_code: 200
+      register: prometheus_health
+
+    - name: Display Prometheus status
+      ansible.builtin.debug:
+        msg: "Prometheus is UP and healthy at http://localhost:9090"

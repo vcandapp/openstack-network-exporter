@@ -1,0 +1,40 @@
+{% if item.registry is defined %}
+FROM {{ item.registry.url }}/{{ item.image }}
+{% else %}
+FROM {{ item.image }}
+{% endif %}
+
+LABEL maintainer="Red Hat" \
+      description="OpenStack Network Exporter - Prometheus metrics exporter for OVS/OVN" \
+      version="{{ item.version | default('latest') }}"
+
+# Install base dependencies and Go toolchain
+RUN curl -o /etc/yum.repos.d/delorean.repo https://trunk.rdoproject.org/centos9-master/current/delorean.repo && \
+    dnf upgrade -y && \
+    dnf -y install \
+        sudo \
+        python3-libselinux \
+        selinux-policy \
+        git \
+        golang \
+        make \
+        iproute \
+        openvswitch \
+        {{ item.pkg_extras | default('') }} && \
+    dnf clean all -y
+
+# Copy source code
+WORKDIR /src
+COPY . /src
+
+# Generate OVSDB models and build the exporter
+RUN go generate ./... && \
+    go build -trimpath -o /app/openstack-network-exporter
+
+# Copy default config
+RUN mkdir -p /etc && \
+    cp /src/etc/openstack-network-exporter.yaml /etc/openstack-network-exporter.yaml
+
+EXPOSE 1981
+
+CMD ["/app/openstack-network-exporter"]

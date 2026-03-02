@@ -1,0 +1,30 @@
+---
+driver:
+  name: podman
+
+platforms:
+  - name: ovs-ovn
+    image: registry.access.redhat.com/ubi9/ubi-init
+    privileged: true
+    command: /usr/sbin/init
+    tmpfs:
+      /run: rw
+      /tmp: rw
+
+  - name: exporter
+    image: quay.io/centos/centos:stream9
+    command: sleep infinity
+
+  - name: prometheus
+    image: quay.io/centos/centos:stream9
+    command: sleep infinity
+
+provisioner:
+  name: ansible
+  env:
+#    ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/..:${ANSIBLE_ROLES_PATH}"
+    ANSIBLE_ROLES_PATH: "../..:~/git/osp_18/exporter/openstack-network-exporter/"
+  playbooks:
+    prepare: prepare.yml
+    converge: converge.yml
+    verify: verify.yml
